@@ -23,7 +23,7 @@ services:
     networks:
       - my_network
     volumes:
-      - ./public:/home/public
+      - ./public:/var/www/html/public
       - ./php:/var/www/html # 作業簡略化のため追加
     init: true
     deploy:
