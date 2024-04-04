@@ -24,6 +24,7 @@ services:
       - my_network
     volumes:
       - ./public:/home/public
+      - ./php:/var/www/html # 作業簡略化のため追加
     init: true
     deploy:
       resources:
