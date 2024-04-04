@@ -18,3 +18,5 @@ portal/tmp
 .vagrant
 
 .idea
+
+/webapp/php/slim.log
