@@ -16,3 +16,7 @@ portal/tmp
 !/portal/log/.keep
 /portal/tmp
 .vagrant
+
+.idea
+
+/webapp/php/slim.log
