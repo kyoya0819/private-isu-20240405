@@ -32,6 +32,7 @@ if (
     && in_array("created_at_index", $posts_indexes)
     && in_array("user_id_index", $posts_indexes)
     && in_array("user_id_index", $comments_indexes)
+    && in_array("post_id_index", $comments_indexes)
 ) {
     echo "Complete\n";
     exit(0);
@@ -95,6 +96,11 @@ if (!in_array("user_id_index", $posts_indexes))
 if (!in_array("user_id_index", $comments_indexes))
     // commentsテーブルに`user_id`でインデックスを貼る
     $pdo->exec("ALTER TABLE comments ADD INDEX user_id_index(user_id)");
+
+
+if (!in_array("post_id_index", $comments_indexes))
+    // commentsテーブルに`user_id`でインデックスを貼る
+    $pdo->exec("ALTER TABLE comments ADD INDEX post_id_index(post_id)");
 
 
 echo "Complete\n";
