@@ -1,4 +1,6 @@
 <?php
+
+use Libs\Db;
 use Psr\Http\Message\ResponseInterface;
 use \Psr\Http\Message\ServerRequestInterface as Request;
 use \Psr\Http\Message\ResponseInterface as Response;
@@ -29,25 +31,8 @@ session_start();
 
 // dependency
 $container = new Container();
-$container->set('settings', function() {
-    return [
-        'public_folder' => dirname(dirname(__FILE__)) . '/public',
-        'db' => [
-            'host' => $_SERVER['ISUCONP_DB_HOST'] ?? 'localhost',
-            'port' => $_SERVER['ISUCONP_DB_PORT'] ?? 3306,
-            'username' => $_SERVER['ISUCONP_DB_USER'] ?? 'root',
-            'password' => $_SERVER['ISUCONP_DB_PASSWORD'] ?? null,
-            'database' => $_SERVER['ISUCONP_DB_NAME'] ?? 'isuconp',
-        ],
-    ];
-});
 $container->set('db', function ($c) {
-    $config = $c->get('settings');
-    return new PDO(
-        "mysql:dbname={$config['db']['database']};host={$config['db']['host']};port={$config['db']['port']};charset=utf8mb4",
-        $config['db']['username'],
-        $config['db']['password']
-    );
+    return new Db();
 });
 
 $container->set('view', function ($c) {
@@ -65,7 +50,7 @@ $container->set('flash', function () {
 
 $container->set('helper', function ($c) {
     return new class($c) {
-        public PDO $db;
+        public Db $db;
 
         public function __construct($c) {
             $this->db = $c->get('db');
@@ -116,33 +101,71 @@ $container->set('helper', function ($c) {
             }
         }
 
-        public function make_posts(array $results, $options = []) {
+        public function make_posts(array $results, $options = []): array
+        {
             $options += ['all_comments' => false];
             $all_comments = $options['all_comments'];
 
+            $posts_id = array_map(fn ($v) => $v["id"], $results);
+            $posts_placeholder = implode(",", array_pad([], count($posts_id), "?"));
+
+            $comments_count = (function () use ($posts_id, $posts_placeholder) {
+                $q = $this->db->prepare("SELECT post_id, COUNT(*) AS post_count from comments WHERE post_id IN($posts_placeholder) GROUP BY post_id");
+                $q->execute($posts_id);
+                $comments_count = $q->fetchAll(PDO::FETCH_ASSOC);
+                return array_combine(array_map(fn ($v) => $v["post_id"], $comments_count), $comments_count)
+                    + array_combine($posts_id, array_pad([], count($posts_id), ["post_count" => 0]));
+            })();
+
+            $comments = (function () use ($posts_id, $all_comments, $posts_placeholder) {
+                $sql = <<<EOF
+SELECT * 
+FROM (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) as comment_index
+    FROM comments
+) AS comments_with_index
+WHERE
+    post_id IN($posts_placeholder)
+EOF;
+                $limit = !$all_comments ? " AND comment_index <= 3" : "";
+                $q = $this->db->prepare($sql . $limit);
+                $q->execute($posts_id);
+                $comments = $q->fetchAll(PDO::FETCH_ASSOC);
+                $res = [];
+                foreach ($comments as $comment) {
+                    $res[$comment["post_id"]][] = $comment;
+                }
+                return $res;
+            })();
+
+            $users_id = array_values(array_unique(
+                array_merge(
+                    array_map(fn ($v) => $v["user_id"], $results),
+                    array_map(fn ($v) => $v["user_id"], array_reduce($comments, "array_merge", []))
+                )
+            ));
+            $users_placeholder = implode(",", array_pad([], count($users_id), "?"));
+
+            $users = (function () use ($users_id, $users_placeholder) {
+                $q = $this->db->prepare("SELECT * from users WHERE id IN($users_placeholder)");
+                $q->execute($users_id);
+                $users = $q->fetchAll(PDO::FETCH_ASSOC);
+                return array_combine(array_map(fn ($v) => $v["id"], $users), $users);
+            })();
+
+
             $posts = [];
             foreach ($results as $post) {
-                $post['comment_count'] = $this->fetch_first('SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?', $post['id'])['count'];
-                $query = 'SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC';
-                if (!$all_comments) {
-                    $query .= ' LIMIT 3';
+                $post["comment_count"] = $comments_count[$post["id"]]["post_count"];
+                $post["comments"] = $comments[$post["id"]] ?? [];
+                $post["user"] = $users[$post["user_id"]];
+                foreach ($post["comments"] as $key => $comment) {
+                    $post["comments"][$key]["user"] = $users[$comment["user_id"]];
                 }
-
-                $ps = $this->db()->prepare($query);
-                $ps->execute([$post['id']]);
-                $comments = $ps->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($comments as &$comment) {
-                    $comment['user'] = $this->fetch_first('SELECT * FROM `users` WHERE `id` = ?', $comment['user_id']);
-                }
-                unset($comment);
-                $post['comments'] = array_reverse($comments);
-
-                $post['user'] = $this->fetch_first('SELECT * FROM `users` WHERE `id` = ?', $post['user_id']);
-                if ($post['user']['del_flg'] == 0) {
+                if ($post["user"]["del_flg"] == 0) {
                     $posts[] = $post;
-                }
-                if (count($posts) >= POSTS_PER_PAGE) {
-                    break;
                 }
             }
             return $posts;
@@ -276,7 +299,7 @@ $app->get('/', function (Request $request, Response $response) {
     $me = $this->get('helper')->get_session_user();
 
     $db = $this->get('db');
-    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` ORDER BY `created_at` DESC');
+    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ' . POSTS_PER_PAGE);
     $ps->execute();
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
