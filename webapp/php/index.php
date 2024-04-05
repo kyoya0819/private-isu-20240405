@@ -6,6 +6,7 @@ use Slim\Factory\AppFactory;
 use DI\Container;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
+use Ramsey\Uuid\Uuid;
 
 $log = new Logger('name');
 $log->pushHandler(new StreamHandler('./slim.log'));
@@ -163,18 +164,6 @@ function redirect(Response $response, $location, $status) {
     return $response->withStatus($status)->withHeader('Location', $location);
 }
 
-function image_url($post) {
-    $ext = '';
-    if ($post['mime'] === 'image/jpeg') {
-        $ext = '.jpg';
-    } else if ($post['mime'] === 'image/png') {
-        $ext = '.png';
-    } else if ($post['mime'] === 'image/gif') {
-        $ext = '.gif';
-    }
-    return "/image/{$post['id']}{$ext}";
-}
-
 function validate_user($account_name, $password) {
     if (!(preg_match('/\A[0-9a-zA-Z_]{3,}\z/', $account_name) && preg_match('/\A[0-9a-zA-Z_]{6,}\z/', $password))) {
         return false;
@@ -225,7 +214,7 @@ $app->post('/login', function (Request $request, Response $response) {
 
     if ($user) {
         $_SESSION['user'] = [
-          'id' => $user['id'],
+            'id' => $user['id'],
         ];
         return redirect($response, '/', 302);
     } else {
@@ -287,7 +276,7 @@ $app->get('/', function (Request $request, Response $response) {
     $me = $this->get('helper')->get_session_user();
 
     $db = $this->get('db');
-    $ps = $db->prepare('SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC');
+    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` ORDER BY `created_at` DESC');
     $ps->execute();
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
@@ -303,7 +292,7 @@ $app->get('/posts', function (Request $request, Response $response) {
     $params = $request->getQueryParams();
     $max_created_at = $params['max_created_at'] ?? null;
     $db = $this->get('db');
-    $ps = $db->prepare('SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC');
+    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC');
     $ps->execute([$max_created_at === null ? null : $max_created_at]);
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
@@ -344,14 +333,14 @@ $app->post('/', function (Request $request, Response $response) {
     }
 
     if ($_FILES['file']) {
-        $mime = '';
+        $filename = Uuid::uuid4()->toString();
         // 投稿のContent-Typeからファイルのタイプを決定する
         if (strpos($_FILES['file']['type'], 'jpeg') !== false) {
-            $mime = 'image/jpeg';
+            $filename .= ".jpg";
         } elseif (strpos($_FILES['file']['type'], 'png') !== false) {
-            $mime = 'image/png';
+            $filename .= ".png";
         } elseif (strpos($_FILES['file']['type'], 'gif') !== false) {
-            $mime = 'image/gif';
+            $filename .= ".gif";
         } else {
             $this->get('flash')->addMessage('notice', '投稿できる画像形式はjpgとpngとgifだけです');
             return redirect($response, '/', 302);
@@ -362,38 +351,23 @@ $app->post('/', function (Request $request, Response $response) {
             return redirect($response, '/', 302);
         }
 
+        $image_dir = dirname(__FILE__) . "/public/image";
+        file_put_contents($image_dir . "/" . $filename, file_get_contents($_FILES['file']['tmp_name']));
+
         $db = $this->get('db');
-        $query = 'INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)';
-        $ps = $db->prepare($query);
+        $ps = $db->prepare('INSERT INTO `posts` (`user_id`, `image`, `body`) VALUES (?,?,?)');
         $ps->execute([
-          $me['id'],
-          $mime,
-          file_get_contents($_FILES['file']['tmp_name']),
-          $params['body'],
+            $me['id'],
+            $filename,
+            $params['body']
         ]);
         $pid = $db->lastInsertId();
+
         return redirect($response, "/posts/{$pid}", 302);
     } else {
         $this->get('flash')->addMessage('notice', '画像が必須です');
         return redirect($response, '/', 302);
     }
-});
-
-$app->get('/image/{id}.{ext}', function (Request $request, Response $response, $args) {
-    if ($args['id'] == 0) {
-        return $response;
-    }
-
-    $post = $this->get('helper')->fetch_first('SELECT * FROM `posts` WHERE `id` = ?', $args['id']);
-
-    if (($args['ext'] == 'jpg' && $post['mime'] == 'image/jpeg') ||
-        ($args['ext'] == 'png' && $post['mime'] == 'image/png') ||
-        ($args['ext'] == 'gif' && $post['mime'] == 'image/gif')) {
-        $response->getBody()->write($post['imgdata']);
-        return $response->withHeader('Content-Type', $post['mime']);
-    }
-    $response->getBody()->write('404');
-    return $response->withStatus(404);
 });
 
 $app->post('/comment', function (Request $request, Response $response) {
@@ -484,7 +458,7 @@ $app->get('/@{account_name}', function (Request $request, Response $response, $a
         return $response->withStatus(404);
     }
 
-    $ps = $db->prepare('SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC');
+    $ps = $db->prepare('SELECT `id`, `user_id`, `body`, `created_at`, `image` FROM `posts` WHERE `user_id` = ? ORDER BY `created_at` DESC');
     $ps->execute([$user['id']]);
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);

@@ -20,3 +20,5 @@ portal/tmp
 .idea
 
 /webapp/php/slim.log
+/webapp/public/image
+/webapp/php/public/image
