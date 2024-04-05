@@ -9,21 +9,27 @@ $pdo = new Db();
 // テーブル定義を取得
 $q = $pdo->query("SHOW COLUMNS FROM posts");
 $res = $q->fetchAll(PDO::FETCH_ASSOC);
-$columns = array_map(fn ($v) => $v["Field"], $res);
+$posts_columns = array_map(fn ($v) => $v["Field"], $res);
+
+$q = $pdo->query("SHOW COLUMNS FROM comments");
+$res = $q->fetchAll(PDO::FETCH_ASSOC);
+$comments_columns = array_map(fn ($v) => $v["Field"], $res);
 
 
 // すでに更新後のテーブル構造の場合処理を終了
 if (
-    in_array("image", $columns)
-    && !in_array("imgdata", $columns)
-    && !in_array("mime", $columns)
+    in_array("image", $posts_columns)
+    && !in_array("imgdata", $posts_columns)
+    && !in_array("mime", $posts_columns)
+    && in_array("created_at_index", $posts_columns)
+    && in_array("user_id_index", $comments_columns)
 ) {
     echo "Complete";
     exit(0);
 }
 
 
-if (!in_array("image", $columns)) {
+if (!in_array("image", $posts_columns)) {
     // テーブルに画像のパスを格納する項目を追加
     $pdo->exec("ALTER TABLE posts ADD image VARCHAR(100) AFTER user_id");
 
@@ -57,14 +63,24 @@ if (!in_array("image", $columns)) {
 }
 
 
-if (in_array("imgdata", $columns))
+if (in_array("imgdata", $posts_columns))
     // `imagedata`カラムを削除
     $pdo->exec("ALTER TABLE posts DROP COLUMN imgdata");
 
 
-if (in_array("mime", $columns))
+if (in_array("mime", $posts_columns))
     // `mime`カラムを削除
     $pdo->exec("ALTER TABLE posts DROP COLUMN mime");
+
+
+if (!in_array("created_at_index", $posts_columns))
+    // postsテーブルに`created_at`でインデックスを貼る
+    $pdo->exec("ALTER TABLE posts ADD INDEX created_at_index(created_at DESC)");
+
+
+if (!in_array("user_id_index", $comments_columns))
+    // commentsテーブルに`user_id_index`でインデックスを貼る
+    $pdo->exec("ALTER TABLE comments ADD INDEX user_id_index(user_id)");
 
 
 echo "Complete";
