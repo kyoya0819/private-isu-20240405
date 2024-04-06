@@ -51,19 +51,6 @@ $container->set('helper', function ($c) {
             $this->db = $c->get('db');
         }
 
-        public function db_initialize() {
-            $db = $this->db();
-            $sql = [];
-            $sql[] = 'DELETE FROM users WHERE id > 1000';
-            $sql[] = 'DELETE FROM posts WHERE id > 10000';
-            $sql[] = 'DELETE FROM comments WHERE id > 100000';
-            $sql[] = 'UPDATE users SET del_flg = 0';
-            $sql[] = 'UPDATE users SET del_flg = 1 WHERE id % 50 = 0';
-            foreach($sql as $s) {
-                $db->query($s);
-            }
-        }
-
         public function try_login($account_name, $password) {
             $user = $this->db->fetchFirst('SELECT id, account_name, passhash FROM users WHERE account_name = ? AND del_flg = 0', $account_name);
             if ($user !== false && calculate_passhash($user['account_name'], $password) == $user['passhash']) {
@@ -191,7 +178,19 @@ function calculate_passhash($account_name, $password) {
 // --------
 
 $app->get('/initialize', function (Request $request, Response $response) {
-    $this->get('helper')->db_initialize();
+    /** @var $db Db */
+    $db = $this->get('db');
+
+    $sql = [];
+    $sql[] = 'DELETE FROM users WHERE id > 1000';
+    $sql[] = 'DELETE FROM posts WHERE id > 10000';
+    $sql[] = 'DELETE FROM comments WHERE id > 100000';
+    $sql[] = 'UPDATE users SET del_flg = 0';
+    $sql[] = 'UPDATE users SET del_flg = 1 WHERE id % 50 = 0';
+    foreach($sql as $s) {
+        $db->query($s);
+    }
+
     return $response;
 });
 
