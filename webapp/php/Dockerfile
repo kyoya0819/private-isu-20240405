@@ -3,7 +3,9 @@ FROM php:8.3-fpm-bookworm
 RUN apt update && apt install -y \
   unzip libmemcached-dev zlib1g-dev libssl-dev
 
-RUN docker-php-ext-install pdo pdo_mysql
+RUN docker-php-ext-install pdo pdo_mysql opcache
+
+COPY ./conf.d/php-opcache.ini $PHP_INI_DIR/conf.d/
 
 RUN pecl install memcached \
   && docker-php-ext-enable memcached

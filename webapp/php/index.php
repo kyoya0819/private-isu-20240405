@@ -6,12 +6,7 @@ use \Psr\Http\Message\ServerRequestInterface as Request;
 use \Psr\Http\Message\ResponseInterface as Response;
 use Slim\Factory\AppFactory;
 use DI\Container;
-use Monolog\Logger;
-use Monolog\Handler\StreamHandler;
 use Ramsey\Uuid\Uuid;
-
-$log = new Logger('name');
-$log->pushHandler(new StreamHandler('./slim.log'));
 
 $_SERVER += ['PATH_INFO' => $_SERVER['REQUEST_URI']];
 $_SERVER['SCRIPT_NAME'] = '/' . basename($_SERVER['SCRIPT_FILENAME']);
@@ -54,23 +49,6 @@ $container->set('helper', function ($c) {
 
         public function __construct($c) {
             $this->db = $c->get('db');
-        }
-
-        public function db() {
-            return $this->db;
-        }
-
-        public function db_initialize() {
-            $db = $this->db();
-            $sql = [];
-            $sql[] = 'DELETE FROM users WHERE id > 1000';
-            $sql[] = 'DELETE FROM posts WHERE id > 10000';
-            $sql[] = 'DELETE FROM comments WHERE id > 100000';
-            $sql[] = 'UPDATE users SET del_flg = 0';
-            $sql[] = 'UPDATE users SET del_flg = 1 WHERE id % 50 = 0';
-            foreach($sql as $s) {
-                $db->query($s);
-            }
         }
 
         public function try_login($account_name, $password) {
@@ -200,7 +178,19 @@ function calculate_passhash($account_name, $password) {
 // --------
 
 $app->get('/initialize', function (Request $request, Response $response) {
-    $this->get('helper')->db_initialize();
+    /** @var $db Db */
+    $db = $this->get('db');
+
+    $sql = [];
+    $sql[] = 'DELETE FROM users WHERE id > 1000';
+    $sql[] = 'DELETE FROM posts WHERE id > 10000';
+    $sql[] = 'DELETE FROM comments WHERE id > 100000';
+    $sql[] = 'UPDATE users SET del_flg = 0';
+    $sql[] = 'UPDATE users SET del_flg = 1 WHERE id % 50 = 0';
+    foreach($sql as $s) {
+        $db->query($s);
+    }
+
     return $response;
 });
 
