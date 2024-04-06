@@ -173,9 +173,7 @@ EOF;
                 foreach ($post["comments"] as $key => $comment) {
                     $post["comments"][$key]["user"] = $users[$comment["user_id"]];
                 }
-                if ($post["user"]["del_flg"] == 0) {
-                    $posts[] = $post;
-                }
+                $posts[] = $post;
             }
             return $posts;
         }
