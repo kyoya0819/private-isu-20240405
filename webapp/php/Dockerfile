@@ -5,7 +5,7 @@ RUN apt update && apt install -y \
 
 RUN docker-php-ext-install pdo pdo_mysql opcache
 
-COPY ./conf.d/php-opcache.ini $PHP_INI_DIR/conf.d/
+COPY ../etc/php/conf.d/php-opcache.ini $PHP_INI_DIR/conf.d/
 
 RUN pecl install memcached \
   && docker-php-ext-enable memcached
