@@ -428,8 +428,7 @@ $app->post('/comment', function (Request $request, Response $response) {
         return $response->withStatus(422);
     }
 
-    // TODO: /\A[0-9]\Z/ か確認
-    if (preg_match('/[0-9]+/', $params['post_id']) == 0) {
+    if (preg_match('/\A[0-9]+\z/', $params['post_id']) == 0) {
         $response->getBody()->write('post_idは整数のみです');
         return $response;
     }
