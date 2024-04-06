@@ -51,10 +51,6 @@ $container->set('helper', function ($c) {
             $this->db = $c->get('db');
         }
 
-        public function db() {
-            return $this->db;
-        }
-
         public function db_initialize() {
             $db = $this->db();
             $sql = [];
