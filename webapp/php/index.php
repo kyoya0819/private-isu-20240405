@@ -119,15 +119,24 @@ $container->set('helper', function ($c) {
 
             $comments = (function () use ($posts_id, $all_comments, $posts_placeholder) {
                 $sql = <<<EOF
-SELECT * 
+SELECT
+    comments_with_index.id,
+    post_id,
+    user_id,
+    comment,
+    comments_with_index.created_at
 FROM (
     SELECT 
         *,
         ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) as comment_index
     FROM comments
-) AS comments_with_index
+) AS comments_with_index 
+    LEFT JOIN users 
+        ON comments_with_index.user_id = users.id
 WHERE
-    post_id IN($posts_placeholder)
+    post_id IN($posts_placeholder) 
+  AND
+    users.del_flg = 0
 EOF;
                 $limit = !$all_comments ? " AND comment_index <= 3" : "";
                 $q = $this->db->prepare($sql . $limit);
@@ -164,9 +173,7 @@ EOF;
                 foreach ($post["comments"] as $key => $comment) {
                     $post["comments"][$key]["user"] = $users[$comment["user_id"]];
                 }
-                if ($post["user"]["del_flg"] == 0) {
-                    $posts[] = $post;
-                }
+                $posts[] = $post;
             }
             return $posts;
         }
@@ -298,8 +305,23 @@ $app->get('/logout', function (Request $request, Response $response) {
 $app->get('/', function (Request $request, Response $response) {
     $me = $this->get('helper')->get_session_user();
 
+    $sql = <<<EOF
+SELECT 
+    posts.id AS id,
+    posts.user_id AS user_id,
+    posts.image AS image,
+    posts.body AS body,
+    posts.created_at AS created_at
+FROM posts
+    LEFT JOIN users
+        ON posts.user_id = users.id 
+WHERE 
+    users.del_flg = 0 
+ORDER BY `created_at` DESC
+EOF;
+
     $db = $this->get('db');
-    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT ' . POSTS_PER_PAGE);
+    $ps = $db->prepare($sql . ' LIMIT ' . POSTS_PER_PAGE);
     $ps->execute();
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
@@ -314,8 +336,25 @@ $app->get('/', function (Request $request, Response $response) {
 $app->get('/posts', function (Request $request, Response $response) {
     $params = $request->getQueryParams();
     $max_created_at = $params['max_created_at'] ?? null;
+
+    $sql = <<<EOF
+SELECT 
+    posts.id AS id,
+    posts.user_id AS user_id,
+    posts.image AS image,
+    posts.body AS body,
+    posts.created_at AS created_at
+FROM posts
+    LEFT JOIN users
+        ON posts.user_id = users.id 
+WHERE 
+    users.del_flg = 0
+  AND
+    posts.created_at <= ?
+ORDER BY `created_at` DESC
+EOF;
     $db = $this->get('db');
-    $ps = $db->prepare('SELECT `id`, `user_id`, `image`, `body`, `created_at` FROM `posts` WHERE `created_at` <= ? ORDER BY `created_at` DESC');
+    $ps = $db->prepare($sql . ' LIMIT ' . POSTS_PER_PAGE);
     $ps->execute([$max_created_at === null ? null : $max_created_at]);
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
@@ -462,12 +501,11 @@ $app->post('/admin/banned', function (Request $request, Response $response) {
         return $response->withStatus(422);
     }
 
+    $uid_placeholder = implode(",", array_pad([], count($params["uid"]), "?"));
+
+    /* @var $db Db */
     $db = $this->get('db');
-    $query = 'UPDATE `users` SET `del_flg` = ? WHERE `id` = ?';
-    foreach ($params['uid'] as $id) {
-        $ps = $db->prepare($query);
-        $ps->execute([1, $id]);
-    }
+    $db->exec("UPDATE users SET del_flg = 1 WHERE id IN ($uid_placeholder)");
 
     return redirect($response, '/admin/banned', 302);
 });
