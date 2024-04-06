@@ -73,17 +73,8 @@ $container->set('helper', function ($c) {
             }
         }
 
-        public function fetch_first($query, ...$params) {
-            $db = $this->db();
-            $ps = $db->prepare($query);
-            $ps->execute($params);
-            $result = $ps->fetch();
-            $ps->closeCursor();
-            return $result;
-        }
-
         public function try_login($account_name, $password) {
-            $user = $this->fetch_first('SELECT * FROM users WHERE account_name = ? AND del_flg = 0', $account_name);
+            $user = $this->db->fetchFirst('SELECT id, account_name, passhash FROM users WHERE account_name = ? AND del_flg = 0', $account_name);
             if ($user !== false && calculate_passhash($user['account_name'], $password) == $user['passhash']) {
                 return $user;
             } elseif ($user) {
@@ -95,7 +86,7 @@ $container->set('helper', function ($c) {
 
         public function get_session_user() {
             if (isset($_SESSION['user'], $_SESSION['user']['id'])) {
-                return $this->fetch_first('SELECT * FROM `users` WHERE `id` = ?', $_SESSION['user']['id']);
+                return $this->db->fetchFirst('SELECT id, account_name, authority FROM `users` WHERE `id` = ?', $_SESSION['user']['id']);
             } else {
                 return null;
             }
@@ -158,7 +149,7 @@ EOF;
             $users_placeholder = implode(",", array_pad([], count($users_id), "?"));
 
             $users = (function () use ($users_id, $users_placeholder) {
-                $q = $this->db->prepare("SELECT * from users WHERE id IN($users_placeholder)");
+                $q = $this->db->prepare("SELECT id, account_name from users WHERE id IN($users_placeholder)");
                 $q->execute($users_id);
                 $users = $q->fetchAll(PDO::FETCH_ASSOC);
                 return array_combine(array_map(fn ($v) => $v["id"], $users), $users);
@@ -201,19 +192,9 @@ function validate_user($account_name, $password) {
     return true;
 }
 
-function digest($src) {
-    // opensslのバージョンによっては (stdin)= というのがつくので取る
-    $src = escapeshellarg($src);
-    return trim(`printf "%s" {$src} | openssl dgst -sha512 | sed 's/^.*= //'`);
-}
-
-function calculate_salt($account_name) {
-    return digest($account_name);
-}
-
 function calculate_passhash($account_name, $password) {
-    $salt = calculate_salt($account_name);
-    return digest("{$password}:{$salt}");
+    $salt = hash("sha512", $account_name);
+    return hash("sha512", "{$password}:{$salt}");
 }
 
 // --------
@@ -238,7 +219,6 @@ $app->post('/login', function (Request $request, Response $response) {
         return redirect($response, '/', 302);
     }
 
-    $db = $this->get('db');
     $params = $request->getParsedBody();
     $user = $this->get('helper')->try_login($params['account_name'], $params['password']);
 
@@ -265,6 +245,9 @@ $app->get('/register', function (Request $request, Response $response) {
 
 
 $app->post('/register', function (Request $request, Response $response) {
+    /** @var $db Db */
+    $db = $this->get('db');
+
     if ($this->get('helper')->get_session_user()) {
         return redirect($response, '/', 302);
     }
@@ -279,13 +262,12 @@ $app->post('/register', function (Request $request, Response $response) {
         return redirect($response, '/register', 302);
     }
 
-    $user = $this->get('helper')->fetch_first('SELECT 1 FROM users WHERE `account_name` = ?', $account_name);
+    $user = $db->fetchFirst('SELECT 1 FROM users WHERE `account_name` = ?', $account_name);
     if ($user) {
         $this->get('flash')->addMessage('notice', 'アカウント名がすでに使われています');
         return redirect($response, '/register', 302);
     }
 
-    $db = $this->get('db');
     $ps = $db->prepare('INSERT INTO `users` (`account_name`, `passhash`) VALUES (?,?)');
     $ps->execute([
         $account_name,
@@ -303,6 +285,8 @@ $app->get('/logout', function (Request $request, Response $response) {
 });
 
 $app->get('/', function (Request $request, Response $response) {
+    /** @var $db Db */
+    $db = $this->get('db');
     $me = $this->get('helper')->get_session_user();
 
     $sql = <<<EOF
@@ -320,7 +304,6 @@ WHERE
 ORDER BY `created_at` DESC
 EOF;
 
-    $db = $this->get('db');
     $ps = $db->prepare($sql . ' LIMIT ' . POSTS_PER_PAGE);
     $ps->execute();
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
@@ -445,8 +428,7 @@ $app->post('/comment', function (Request $request, Response $response) {
         return $response->withStatus(422);
     }
 
-    // TODO: /\A[0-9]\Z/ か確認
-    if (preg_match('/[0-9]+/', $params['post_id']) == 0) {
+    if (preg_match('/\A[0-9]+\z/', $params['post_id']) == 0) {
         $response->getBody()->write('post_idは整数のみです');
         return $response;
     }
@@ -511,8 +493,9 @@ $app->post('/admin/banned', function (Request $request, Response $response) {
 });
 
 $app->get('/@{account_name}', function (Request $request, Response $response, $args) {
+    /** @var $db Db */
     $db = $this->get('db');
-    $user = $this->get('helper')->fetch_first('SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0', $args['account_name']);
+    $user = $db->fetchFirst('SELECT * FROM `users` WHERE `account_name` = ? AND `del_flg` = 0', $args['account_name']);
 
     if ($user === false) {
         $response->getBody()->write('404');
@@ -524,7 +507,7 @@ $app->get('/@{account_name}', function (Request $request, Response $response, $a
     $results = $ps->fetchAll(PDO::FETCH_ASSOC);
     $posts = $this->get('helper')->make_posts($results);
 
-    $comment_count = $this->get('helper')->fetch_first('SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?', $user['id'])['count'];
+    $comment_count = $db->fetchFirst('SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = ?', $user['id'])['count'];
 
     $ps = $db->prepare('SELECT `id` FROM `posts` WHERE `user_id` = ?');
     $ps->execute([$user['id']]);
@@ -534,7 +517,7 @@ $app->get('/@{account_name}', function (Request $request, Response $response, $a
     $commented_count = 0;
     if ($post_count > 0) {
         $placeholder = implode(',', array_fill(0, count($post_ids), '?'));
-        $commented_count = $this->get('helper')->fetch_first("SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ({$placeholder})", ...$post_ids)['count'];
+        $commented_count = $db->fetchFirst("SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN ({$placeholder})", ...$post_ids)['count'];
     }
 
     $me = $this->get('helper')->get_session_user();
