@@ -462,12 +462,11 @@ $app->post('/admin/banned', function (Request $request, Response $response) {
         return $response->withStatus(422);
     }
 
+    $uid_placeholder = implode(",", array_pad([], count($params["uid"]), "?"));
+
+    /* @var $db Db */
     $db = $this->get('db');
-    $query = 'UPDATE `users` SET `del_flg` = ? WHERE `id` = ?';
-    foreach ($params['uid'] as $id) {
-        $ps = $db->prepare($query);
-        $ps->execute([1, $id]);
-    }
+    $db->exec("UPDATE users SET del_flg = 1 WHERE id IN ($uid_placeholder)");
 
     return redirect($response, '/admin/banned', 302);
 });
